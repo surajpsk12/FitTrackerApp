@@ -65,8 +65,8 @@ and visualize weekly progress. It uses Android's built-in sensors for real-time 
 
 ### Installation:
 ```bash
-git clone https://github.com/yourusername/ExpenseTrackerApp.git
-cd ExpenseTrackerApp
+git clone (https://github.com/surajpsk12/FitTrackerApp.git)
+cd FitTrackerApp
 ````
 
 > Open the project in Android Studio and click ▶️ Run.
