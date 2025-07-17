@@ -65,7 +65,7 @@ and visualize weekly progress. It uses Android's built-in sensors for real-time 
 
 ### Installation:
 ```bash
-git clone (https://github.com/surajpsk12/FitTrackerApp.git)
+git clone https://github.com/surajpsk12/FitTrackerApp.git
 cd FitTrackerApp
 ````
 
