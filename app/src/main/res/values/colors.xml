@@ -11,4 +11,6 @@
     <color name="calories_color">#FF6B35</color>
     <color name="card_border">#FF6B35</color>
     <color name="progress_track">#333333</color>
+
+    <color name="purple_700">#F4511E</color>
 </resources>

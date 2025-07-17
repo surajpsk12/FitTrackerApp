@@ -26,11 +26,6 @@ public class StepViewModel extends AndroidViewModel {
         repository.update(stepEntry);
     }
 
-    // ✅ Removed "delete" because StepRepository doesn't have it
-    // public void delete(StepEntry stepEntry) {
-    //     repository.delete(stepEntry);
-    // }
-
     public LiveData<List<StepEntry>> getAllSteps() {
         return allSteps;
     }
@@ -45,5 +40,10 @@ public class StepViewModel extends AndroidViewModel {
 
     public void insertOrUpdateSteps(String date, int stepCount) {
         repository.insertOrUpdateSteps(date, stepCount);
+    }
+
+    // ✅ NEW: For LineChart weekly data
+    public void getLast7DaysSteps(StepRepository.ChartCallback callback) {
+        repository.getLast7DaysSteps(callback);
     }
 }

@@ -13,31 +13,36 @@ import java.util.List;
 @Dao
 public interface StepDao {
 
-    // Insert or replace step entry for the day
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     void insert(StepEntry stepEntry);
 
-    // Get only step count as integer for a given date
-    @Query("SELECT steps FROM step_table WHERE date = :date LIMIT 1")
-    LiveData<Integer> getStepCount(String date);
-
-    // Get full step entry object for UI observation
-    @Query("SELECT * FROM step_table WHERE date = :date LIMIT 1")
-    LiveData<StepEntry> getStepsByDate(String date);
-
-    // Raw (non-LiveData) fetch, useful for background/thread operations
-    @Query("SELECT * FROM step_table WHERE date = :date LIMIT 1")
-    StepEntry getStepsByDateRaw(String date);
-
-    // Update step entry
     @Update
     void update(StepEntry stepEntry);
 
-    // Delete step entry
     @Delete
     void delete(StepEntry stepEntry);
 
-    // Get all step entries, most recent first
+    // 🔹 Get today's step count as LiveData
+    @Query("SELECT steps FROM step_table WHERE date = :date LIMIT 1")
+    LiveData<Integer> getStepCount(String date);
+
+    // 🔹 Get today's StepEntry as LiveData
+    @Query("SELECT * FROM step_table WHERE date = :date LIMIT 1")
+    LiveData<StepEntry> getStepsByDate(String date);
+
+    // 🔹 Get today's StepEntry as plain object (non-LiveData) — for background logic
+    @Query("SELECT * FROM step_table WHERE date = :date LIMIT 1")
+    StepEntry getStepsByDateRaw(String date);
+
+    // 🔹 Get all entries, sorted latest-first
     @Query("SELECT * FROM step_table ORDER BY date DESC")
     LiveData<List<StepEntry>> getAllStepEntries();
+
+    // ✅ For chart: Get last 7 days in ascending order
+    @Query("SELECT * FROM step_table ORDER BY date DESC LIMIT 7")
+    List<StepEntry> getLast7DaysStepsRaw();
+
+    // ✅ Optional: Get only steps for chart (LiveData)
+    @Query("SELECT steps FROM step_table ORDER BY date DESC LIMIT 7")
+    LiveData<List<Integer>> getLast7DaysStepCounts();
 }

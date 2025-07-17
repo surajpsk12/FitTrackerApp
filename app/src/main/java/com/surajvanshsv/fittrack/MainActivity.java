@@ -1,14 +1,11 @@
 package com.surajvanshsv.fittrack;
 
 import android.Manifest;
-import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -22,26 +19,32 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.lifecycle.ViewModelProvider;
 
+import com.github.mikephil.charting.charts.LineChart;
+import com.github.mikephil.charting.components.XAxis;
+import com.github.mikephil.charting.data.Entry;
+import com.github.mikephil.charting.data.LineData;
+import com.github.mikephil.charting.data.LineDataSet;
+
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final int PERMISSION_REQUEST_ACTIVITY_RECOGNITION = 101;
 
-    private SensorManager sensorManager;
-    private Sensor stepCounterSensor;
-    private SensorEventListener stepListener;
-
-    private int initialStepCount = -1;
-    private TextView stepCountText, distanceText, caloriesText;
+    private TextView stepCountText, distanceText, caloriesText, goalText;
+    private ProgressBar progressBar;
+    private LineChart lineChart;
 
     private StepViewModel stepViewModel;
     private String todayDate;
 
     private static final double STEP_LENGTH_METERS = 0.75;
     private static final double CALORIES_PER_STEP = 0.04;
+    private static final int DAILY_GOAL = 8000;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,9 +52,13 @@ public class MainActivity extends AppCompatActivity {
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
 
+        // Initialize UI
         stepCountText = findViewById(R.id.stepCountText);
         distanceText = findViewById(R.id.distanceText);
         caloriesText = findViewById(R.id.caloriesText);
+        goalText = findViewById(R.id.goalText);
+        progressBar = findViewById(R.id.goalProgress);
+        lineChart = findViewById(R.id.lineChart);
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -59,78 +66,94 @@ public class MainActivity extends AppCompatActivity {
             return insets;
         });
 
-        // Request permission if required (Android 10+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION)
-                    != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.ACTIVITY_RECOGNITION},
-                        PERMISSION_REQUEST_ACTIVITY_RECOGNITION);
-            }
+        // Permissions
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION)
+                        != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.ACTIVITY_RECOGNITION},
+                    PERMISSION_REQUEST_ACTIVITY_RECOGNITION);
         }
 
+        // Start step tracking service
+        Intent serviceIntent = new Intent(this, StepTrackingService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+
+        // Schedule 12AM step reset
+        StepResetScheduler.scheduleDailyReset(this);
+
+        // Initialize ViewModel and today's date
+        stepViewModel = new ViewModelProvider(this).get(StepViewModel.class);
         todayDate = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
 
-        stepViewModel = new ViewModelProvider(this).get(StepViewModel.class);
-
-        // Observe step data from database
+        // Observe today’s steps
         stepViewModel.getStepByDate(todayDate).observe(this, stepEntry -> {
-            if (stepEntry != null) {
-                int steps = stepEntry.getSteps();
-                stepCountText.setText(String.valueOf(steps));
+            int steps = (stepEntry != null) ? stepEntry.getSteps() : 0;
 
-                double distanceInKm = (steps * STEP_LENGTH_METERS) / 1000.0;
-                double calories = steps * CALORIES_PER_STEP;
+            stepCountText.setText(String.valueOf(steps));
+            double distanceKm = (steps * STEP_LENGTH_METERS) / 1000.0;
+            double calories = steps * CALORIES_PER_STEP;
 
-                distanceText.setText(String.format(Locale.getDefault(), "%.2f km", distanceInKm));
-                caloriesText.setText(String.format(Locale.getDefault(), "%.1f kcal", calories));
-            } else {
-                stepCountText.setText("0");
-                distanceText.setText("0.00 km");
-                caloriesText.setText("0.0 kcal");
-            }
+            distanceText.setText(String.format(Locale.getDefault(), "%.2f km", distanceKm));
+            caloriesText.setText(String.format(Locale.getDefault(), "%.1f kcal", calories));
+
+            progressBar.setMax(DAILY_GOAL);
+            progressBar.setProgress(steps);
+
+            int percent = (int) ((steps / (float) DAILY_GOAL) * 100);
+            goalText.setText(percent + "% of " + DAILY_GOAL);
+
+            // Schedule daily 4PM notification
+            StepNotificationScheduler.scheduleDailyNotification(this);
         });
 
-        // Setup sensor
-        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+        // Observe and update weekly chart
+        stepViewModel.getAllSteps().observe(this, this::updateChart);
+    }
 
-        stepListener = new SensorEventListener() {
-            @Override
-            public void onSensorChanged(SensorEvent event) {
-                int totalSteps = (int) event.values[0];
+    private void updateChart(List<StepEntry> stepEntries) {
+        List<Entry> entries = new ArrayList<>();
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+        long now = System.currentTimeMillis();
 
-                if (initialStepCount == -1) {
-                    initialStepCount = totalSteps;
+        for (StepEntry entry : stepEntries) {
+            try {
+                Date date = sdf.parse(entry.getDate());
+                long daysAgo = (now - date.getTime()) / (1000 * 60 * 60 * 24);
+                if (daysAgo <= 6) {
+                    entries.add(new Entry(6 - (int) daysAgo, entry.getSteps()));
                 }
-
-                int currentSteps = totalSteps - initialStepCount;
-
-                // Save or update today's step count
-                stepViewModel.insertOrUpdateSteps(todayDate, currentSteps);
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-
-            @Override
-            public void onAccuracyChanged(Sensor sensor, int accuracy) {
-                // Not used
-            }
-        };
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (stepCounterSensor != null) {
-            sensorManager.registerListener(stepListener, stepCounterSensor, SensorManager.SENSOR_DELAY_UI);
-        } else {
-            Toast.makeText(this, "Step Counter not available!", Toast.LENGTH_SHORT).show();
         }
-    }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        sensorManager.unregisterListener(stepListener);
+        LineDataSet dataSet = new LineDataSet(entries, "Last 7 Days");
+        dataSet.setColor(getColor(R.color.purple_700));
+        dataSet.setValueTextColor(getColor(R.color.black));
+        dataSet.setCircleRadius(4f);
+        dataSet.setLineWidth(2f);
+        dataSet.setCircleColor(getColor(R.color.purple_700));
+        dataSet.setDrawFilled(true);
+        dataSet.setFillAlpha(100);
+
+        LineData lineData = new LineData(dataSet);
+        lineChart.setData(lineData);
+        lineChart.getDescription().setEnabled(false);
+        lineChart.getAxisRight().setEnabled(false);
+        lineChart.getAxisLeft().setAxisMinimum(0);
+
+        XAxis xAxis = lineChart.getXAxis();
+        xAxis.setPosition(XAxis.XAxisPosition.BOTTOM);
+        xAxis.setGranularity(1f);
+        xAxis.setLabelCount(7);
+        xAxis.setDrawGridLines(false);
+
+        lineChart.invalidate();
     }
 
     @Override
@@ -141,7 +164,7 @@ public class MainActivity extends AppCompatActivity {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "Permission granted!", Toast.LENGTH_SHORT).show();
             } else {
-                Toast.makeText(this, "Permission denied. Step counter will not work.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Permission denied. Step tracking will not work properly.", Toast.LENGTH_LONG).show();
             }
         }
     }
